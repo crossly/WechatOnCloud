@@ -12,6 +12,8 @@
   <a href="https://github.com/Gloridust/WechatOnCloud/issues"><img src="https://img.shields.io/github/issues/Gloridust/WechatOnCloud?style=flat-square" alt="issues" /></a>
   <img src="https://img.shields.io/badge/arch-amd64%20%7C%20arm64-2496ED?style=flat-square&logo=docker&logoColor=white" alt="arch" />
   <img src="https://img.shields.io/badge/PWA-ready-5A0FC8?style=flat-square" alt="pwa" />
+  <a href="https://x.com/gloridust1024"><img src="https://img.shields.io/badge/Twitter-@gloridust1024-1DA1F2?style=flat-square&logo=x&logoColor=white" alt="twitter" /></a>
+  <a href="https://t.me/WechatOnCloud"><img src="https://img.shields.io/badge/Telegram-WechatOnCloud-26A5E4?style=flat-square&logo=telegram&logoColor=white" alt="telegram" /></a>
 </p>
 
 <p>
@@ -176,6 +178,11 @@ docker compose up -d            # 直接从 GHCR 拉取
 - [x] 多端并发控制（操作控制权心跳软锁 + 只读遮罩 + 申请接管）
 - [ ] 掉登录时 web 端二维码重扫入口
 - [~] 打包成飞牛原生 fpk 分发（工程已就绪见 [fnos/](fnos/)，待真实设备验证 docker.sock 权限）
+
+## 交流与关注
+
+- 🐦 Twitter / X：[@gloridust1024](https://x.com/gloridust1024) — 更新与动态
+- ✈️ Telegram：[@WechatOnCloud](https://t.me/WechatOnCloud) — 交流群 / 问题反馈
 
 ## 致谢
 
