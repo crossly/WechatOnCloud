@@ -182,4 +182,6 @@ export const api = {
   controlBeat: (id: string) => req<{ mine: boolean; holder: string }>(`/api/instances/${id}/control/beat`, { method: 'POST' }),
   controlTake: (id: string) => req<{ mine: boolean; holder: string }>(`/api/instances/${id}/control/take`, { method: 'POST' }),
   typeInInstance: (id: string, text: string) => req(`/api/instances/${id}/type`, { method: 'POST', body: JSON.stringify({ text }) }),
+  sendKeyToInstance: (id: string, key: string) =>
+    req(`/api/instances/${id}/key`, { method: 'POST', body: JSON.stringify({ key }) }),
 };
