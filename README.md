@@ -86,18 +86,23 @@ cp .env.example .env            # 至少改掉默认密码 WOC_PASSWORD
 docker compose up -d            # compose 默认优先用本地镜像，不会再去远端拉
 ```
 
-**方式 B · 拉取官方镜像（推荐）**
+**方式 B · 拉取官方镜像（推荐，无需 clone 整个仓库）**
 
-```bash
-git clone https://github.com/Gloridust/WechatOnCloud.git WechatOnCloud
-cd WechatOnCloud
-cp .env.example .env            # 至少改掉默认密码 WOC_PASSWORD
-docker compose up -d            # 默认从 Docker Hub 拉取（公开、amd64/arm64 多架构）
-```
+部署**只需要 `docker-compose.yml` 这一个文件**——它用 `image:` 直接拉官方镜像，面板数据放在该文件旁自动创建的 `./data-panel` 目录，不依赖仓库里的其它文件。
 
-> **为什么默认 Docker Hub**：国内 / 国际通用、无需登录即可拉公开镜像，**飞牛 OS（fnOS）等 NAS 系统还内置了 Docker Hub 拉取加速**，通常比 GHCR 更快更稳。
+- **命令行**：丢进一个空目录拉起即可
+  ```bash
+  mkdir woc && cd woc
+  curl -fsSL https://raw.githubusercontent.com/Gloridust/WechatOnCloud/main/docker-compose.yml -o docker-compose.yml
+  docker compose up -d            # 默认从 Docker Hub 拉取（公开、amd64/arm64 多架构）
+  ```
+  > `raw.githubusercontent.com` 拉不动时，在 GitHub 网页打开根目录的 [docker-compose.yml](docker-compose.yml)，复制内容自己建个同名文件即可。
 
-> **切换镜像源**：在 `.env` 改一行 `WOC_IMAGE_PREFIX`（改完 `docker compose pull && docker compose up -d`）：
+- **飞牛 OS（fnOS）/ 群晖 等 NAS**：在 **Docker → Compose 一键部署** 界面，把根目录 [docker-compose.yml](docker-compose.yml) 的内容**直接粘贴进去**即可部署，无需命令行、无需 clone。
+
+> **改配置（强烈建议至少改密码）**：默认管理员 **admin / wechat**。登录后在「修改密码」里改；或部署前在 `docker-compose.yml` 旁放一个 `.env`（从 [.env.example](.env.example) 下载改名），又或在 NAS 的 Compose 环境变量里填 `WOC_PASSWORD`、`WOC_HTTP_PORT`、`WOC_IMAGE_PREFIX` 等（全部可配置项见 [.env.example](.env.example)）。
+
+> **为什么默认 Docker Hub**：国内 / 国际通用、免登录即可拉公开镜像，**飞牛 OS（fnOS）等 NAS 系统还内置了 Docker Hub 拉取加速**，通常比 GHCR 更快更稳。`ghcr.io` 拉不动时设 `WOC_IMAGE_PREFIX` 切源：
 >
 > ```bash
 > WOC_IMAGE_PREFIX=ghcr.io/gloridust          # 备用：GitHub Container Registry
