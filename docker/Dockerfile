@@ -75,7 +75,7 @@ RUN chmod 755 /defaults/autostart
 # 启动钩子（00）：给每个实例唯一且持久的 machine-id，避免所有实例共用镜像里烤死的同一个，
 # 触发腾讯"设备农场"风控导致登录即被强制退出。须在 autostart（拉起微信）之前执行，故用 00 前缀。
 COPY woc-identity.sh /custom-cont-init.d/00-woc-identity
-RUN chmod +x /custom-cont-init.d/00-woc-identity
+RUN chmod 755 /custom-cont-init.d/00-woc-identity
 
 # 启动钩子（01）：每次启动用镜像内最新 autostart 覆盖数据卷旧副本（否则旧实例升级后用不上新逻辑）
 COPY woc-update-autostart /custom-cont-init.d/01-woc-autostart
