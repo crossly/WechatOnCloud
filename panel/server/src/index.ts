@@ -55,6 +55,7 @@ import {
   instanceMemoryMB,
   instanceHttpHealthy,
   regenInstanceMachineId,
+  keyInInstance,
   listVolume,
   volMkdir,
   volMove,
@@ -629,6 +630,21 @@ app.post('/api/instances/:id/type', async (req, reply) => {
     return { ok: true };
   } catch (e: any) {
     return reply.code(500).send({ error: e?.message || '输入失败' });
+  }
+});
+
+app.post('/api/instances/:id/key', async (req, reply) => {
+  const u = requireAuth(req, reply);
+  if (!u) return;
+  const id = (req.params as any).id;
+  if (!userCanAccess(u, id)) return reply.code(403).send({ error: '无权访问该实例' });
+  const { key } = (req.body as any) ?? {};
+  if (!key || typeof key !== 'string') return reply.code(400).send({ error: '按键不合法' });
+  try {
+    await keyInInstance(findInstance(id)!, key);
+    return { ok: true };
+  } catch (e: any) {
+    return reply.code(400).send({ error: e?.message || '按键发送失败' });
   }
 });
 

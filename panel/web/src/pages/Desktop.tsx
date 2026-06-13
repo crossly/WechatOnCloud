@@ -1,10 +1,20 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CompositionEvent, type FormEvent, type KeyboardEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { useUI } from '../ui';
 import { useAuth } from '../auth';
 import { useInstances } from '../AppShell';
 import { VncAudio } from '../vncAudio';
+import {
+  ImeCommitBuffer,
+  imeProxyClassName,
+  imeProxyCommitTransport,
+  imeProxyEventPoint,
+  imeProxyMobileViewportPosition,
+  imeProxyPositionFromFrameClick,
+  imeProxyShortcutKey,
+  imeProxyShouldActivateFromFrameClick,
+} from '../imeProxy';
 
 // KasmVNC noVNC 页面；反代按实例隔离：/desktop/<id>/* → 对应容器，注入凭据。
 function desktopUrl(id: string) {
@@ -47,7 +57,11 @@ export default function InstanceView({ onOpenMenu }: { onOpenMenu: () => void })
   const [showClip, setShowClip] = useState(false);
   const [clipText, setClipText] = useState('');
   // 中文输入条：面板里的真实 textarea（原生客户端输入法 100% 可用），回车经 xclip+xdotool 粘进微信。
-  const [imeBar, setImeBar] = useState(true); // 默认开（直接在 VNC 里打中文不稳，给一个可靠通道）
+  const [imeBar, setImeBar] = useState(false); // 兜底输入条，默认收起；日常输入走透明代理
+  const [imeProxyEnabled, setImeProxyEnabled] = useState(true);
+  const [imeProxyMobile, setImeProxyMobile] = useState(false);
+  const [imeProxyTyping, setImeProxyTyping] = useState(false);
+  const [imeProxyActive, setImeProxyActive] = useState(false);
   const [imeText, setImeText] = useState('');
   const [imeSending, setImeSending] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -56,9 +70,13 @@ export default function InstanceView({ onOpenMenu }: { onOpenMenu: () => void })
   const [vncNonce, setVncNonce] = useState(0);
   const fileInput = useRef<HTMLInputElement>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
+  const imeProxyRef = useRef<HTMLTextAreaElement>(null);
   const dragDepth = useRef(0);
   const lastBeat = useRef(0);
   const audioRef = useRef<VncAudio | null>(null);
+  const imeBuffer = useRef<ImeCommitBuffer | null>(null);
+  const imePos = useRef<{ x: number; y: number | null }>({ x: 24, y: 72 });
+  const imeQueue = useRef<Promise<void>>(Promise.resolve());
 
   const inst = instances.find((i) => i.id === id);
   // 进入实例时，共享列表可能尚未同步（管理页新建/安装后），先按"探测中"显示加载态，
@@ -79,6 +97,43 @@ export default function InstanceView({ onOpenMenu }: { onOpenMenu: () => void })
     setImeText('');
     setProbing(true);
   }, [id]);
+
+  useEffect(() => {
+    const sync = () => {
+      const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+      setImeProxyMobile(coarse || window.innerWidth <= 720);
+    };
+    sync();
+    window.addEventListener('resize', sync);
+    return () => window.removeEventListener('resize', sync);
+  }, []);
+
+  useEffect(() => {
+    if (!imeProxyMobile || !imeProxyEnabled) return;
+    const sync = () => {
+      const pos = imeProxyMobileViewportPosition({
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        visualViewportTop: window.visualViewport?.offsetTop,
+        visualViewportHeight: window.visualViewport?.height,
+      });
+      imePos.current = pos;
+      const ta = imeProxyRef.current;
+      if (ta && document.activeElement === ta) {
+        ta.style.left = `${pos.x}px`;
+        ta.style.top = '';
+      }
+    };
+    sync();
+    window.visualViewport?.addEventListener('resize', sync);
+    window.visualViewport?.addEventListener('scroll', sync);
+    window.addEventListener('orientationchange', sync);
+    return () => {
+      window.visualViewport?.removeEventListener('resize', sync);
+      window.visualViewport?.removeEventListener('scroll', sync);
+      window.removeEventListener('orientationchange', sync);
+    };
+  }, [imeProxyEnabled, imeProxyMobile]);
 
   // 桌面久未加载出来 → 判为"无响应"，把无限转圈换成可操作的重试/重启，不让用户干等。
   // （实测容器跑久了会 I/O/服务 stall，进程没死、显示在线，但读不出 VNC 文件而永远连接中。）
@@ -177,7 +232,33 @@ export default function InstanceView({ onOpenMenu }: { onOpenMenu: () => void })
     if (!showVnc || !id || !frameLoaded) return;
     const win = frameRef.current?.contentWindow;
     if (!win) return;
-    const onInteract = async () => {
+    const onInteract = async (ev?: Event) => {
+      const point = ev ? imeProxyEventPoint(ev as MouseEvent | TouchEvent) : null;
+      if (point) {
+        const rect = frameRef.current?.getBoundingClientRect();
+        if (rect) {
+          if (imeProxyShouldActivateFromFrameClick({ frame: rect, clientX: point.clientX, clientY: point.clientY })) {
+            imePos.current = imeProxyMobile
+              ? imeProxyMobileViewportPosition({
+                  viewportWidth: window.innerWidth,
+                  viewportHeight: window.innerHeight,
+                  visualViewportTop: window.visualViewport?.offsetTop,
+                  visualViewportHeight: window.visualViewport?.height,
+                })
+              : imeProxyPositionFromFrameClick({
+                  frame: rect,
+                  clientX: point.clientX,
+                  clientY: point.clientY,
+                  viewportWidth: window.innerWidth,
+                  viewportHeight: window.innerHeight,
+                });
+            if (imeProxyMobile) focusImeProxy();
+            else window.setTimeout(focusImeProxy, 30);
+          } else {
+            blurImeProxy();
+          }
+        }
+      }
       const now = Date.now();
       if (now - lastBeat.current < 2500) return;
       lastBeat.current = now;
@@ -188,7 +269,7 @@ export default function InstanceView({ onOpenMenu }: { onOpenMenu: () => void })
         /* ignore */
       }
     };
-    const evs = ['mousedown', 'keydown', 'wheel'] as const;
+    const evs = ['mousedown', 'pointerdown', 'touchstart', 'keydown', 'wheel'] as const;
     try {
       evs.forEach((e) => win.addEventListener(e, onInteract, { capture: true, passive: true }));
     } catch {
@@ -201,7 +282,7 @@ export default function InstanceView({ onOpenMenu }: { onOpenMenu: () => void })
         /* ignore */
       }
     };
-  }, [showVnc, id, frameLoaded]);
+  }, [showVnc, id, frameLoaded, imeProxyMobile, imeProxyEnabled, control]);
 
   // 每次进入/重连桌面前，强制把 KasmVNC 的 enable_ime 设为【关】。
   // 原因：开启 IME 模式后，noVNC 用隐藏 textarea + 合成事件还原中文，需要前端拦截/差分，环环相扣极脆，
@@ -293,6 +374,10 @@ export default function InstanceView({ onOpenMenu }: { onOpenMenu: () => void })
 
   // 同源 iframe：把键盘焦点交给 VNC，帮助宿主机输入法把合成的字送进去
   const focusFrame = () => {
+    if (imeProxyEnabled) {
+      focusImeProxy();
+      return;
+    }
     try {
       frameRef.current?.focus();
       frameRef.current?.contentWindow?.focus();
@@ -340,6 +425,30 @@ export default function InstanceView({ onOpenMenu }: { onOpenMenu: () => void })
     }
   };
 
+  const pasteTextToRemote = async (text: string) => {
+    if (!text || !id) return;
+    if (control && !control.free && !control.mine) throw new Error(`当前由 ${control.holder || '其他用户'} 操作`);
+    if (imeProxyCommitTransport() === 'server') {
+      try {
+        await api.typeInInstance(id, text);
+        return;
+      } catch (e) {
+        if (!pushClipboardToRemote(text)) throw e;
+        await new Promise((resolve) => window.setTimeout(resolve, 30));
+        await api.sendKeyToInstance(id, 'Paste');
+        return;
+      }
+    }
+    await api.typeInInstance(id, text);
+  };
+
+  const queueTextToRemote = (text: string) => {
+    imeQueue.current = imeQueue.current
+      .catch(() => undefined)
+      .then(() => pasteTextToRemote(text))
+      .catch((e: any) => toast(e?.message || '输入发送失败', 'error'));
+  };
+
   const sendClip = () => {
     const t = clipText;
     if (!t) {
@@ -353,6 +462,76 @@ export default function InstanceView({ onOpenMenu }: { onOpenMenu: () => void })
     }
   };
 
+  if (!imeBuffer.current) {
+    imeBuffer.current = new ImeCommitBuffer((text) => queueTextToRemote(text));
+  }
+
+  function focusImeProxy() {
+    if (!imeProxyEnabled || !showVnc || !frameLoaded) return;
+    if (control && !control.free && !control.mine) return;
+    const ta = imeProxyRef.current;
+    if (!ta) return;
+    ta.style.left = `${imePos.current.x}px`;
+    ta.style.top = imeProxyMobile ? '' : `${imePos.current.y}px`;
+    ta.value = '';
+    setImeProxyTyping(false);
+    setImeProxyActive(true);
+    ta.focus({ preventScroll: true });
+    try {
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function blurImeProxy() {
+    const ta = imeProxyRef.current;
+    if (!ta) return;
+    ta.value = '';
+    setImeProxyTyping(false);
+    setImeProxyActive(false);
+    ta.blur();
+  }
+
+  const onImeProxyInput = (e: FormEvent<HTMLTextAreaElement>) => {
+    const el = e.currentTarget;
+    const native = e.nativeEvent as InputEvent;
+    setImeProxyTyping(!!el.value);
+    imeBuffer.current?.input(el.value, !!native.isComposing);
+    if (!native.isComposing) {
+      el.value = '';
+      setImeProxyTyping(false);
+    }
+  };
+
+  const onImeProxyCompositionEnd = (e: CompositionEvent<HTMLTextAreaElement>) => {
+    const el = e.currentTarget;
+    imeBuffer.current?.compositionEnd(el.value);
+    el.value = '';
+    setImeProxyTyping(false);
+    window.setTimeout(focusImeProxy, 0);
+  };
+
+  const onImeProxyKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!id || e.nativeEvent.isComposing) return;
+    const shortcut = imeProxyShortcutKey({
+      key: e.key,
+      ctrlKey: e.ctrlKey,
+      metaKey: e.metaKey,
+      altKey: e.altKey,
+      isComposing: e.nativeEvent.isComposing,
+    });
+    if (shortcut) {
+      e.preventDefault();
+      void api.sendKeyToInstance(id, shortcut).catch((err: any) => toast(err?.message || '按键发送失败', 'error'));
+      return;
+    }
+    const editableKeys = new Set(['Backspace', 'Delete', 'Enter', 'Tab', 'Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']);
+    if (!editableKeys.has(e.key)) return;
+    e.preventDefault();
+    void api.sendKeyToInstance(id, e.key).catch((err: any) => toast(err?.message || '按键发送失败', 'error'));
+  };
+
   // 中文输入条发送：把本框文本经 xclip+xdotool 直接粘进微信当前聚焦的输入框（绕开 VNC IME）。
   // 在面板的真实 textarea 里用原生输入法打字，100% 可靠，不依赖 VNC 的 enable_ime / 合成事件。
   const sendImeText = async () => {
@@ -360,7 +539,7 @@ export default function InstanceView({ onOpenMenu }: { onOpenMenu: () => void })
     if (!t.trim() || !id) return;
     setImeSending(true);
     try {
-      await api.typeInInstance(id, t);
+      await pasteTextToRemote(t);
       setImeText('');
     } catch (e: any) {
       toast(e?.message || '发送失败：请确认实例已「升级实例」（镜像含 xclip/xdotool）', 'error');
@@ -449,11 +628,18 @@ export default function InstanceView({ onOpenMenu }: { onOpenMenu: () => void })
               文件
             </button>
             <button
+              className={'ws-action' + (imeProxyEnabled ? ' on' : '')}
+              title="本机输入法直通：中英文、数字、标点混输，上屏后立即进入微信"
+              onClick={() => setImeProxyEnabled((v) => !v)}
+            >
+              即时输入
+            </button>
+            <button
               className={'ws-action' + (imeBar ? ' on' : '')}
-              title="底部中文输入条：用本机输入法打中文，回车送进微信（最可靠）"
+              title="打开兜底输入条：输入一段后发送到微信"
               onClick={() => setImeBar((v) => !v)}
             >
-              中文输入
+              输入条
             </button>
             <button
               className="ws-action"
@@ -539,7 +725,7 @@ export default function InstanceView({ onOpenMenu }: { onOpenMenu: () => void })
         </div>
       ) : (
         <div className="iv-stage iv-stage--vnc">
-          <div className="iv-canvas">
+          <div className="iv-canvas" onMouseDown={() => window.setTimeout(focusImeProxy, 0)}>
           <iframe
             key={`${id}:${vncNonce}`}
             ref={frameRef}
@@ -551,9 +737,10 @@ export default function InstanceView({ onOpenMenu }: { onOpenMenu: () => void })
               setFrameLoaded(true);
               setTimeout(() => {
                 focusFrame(); // 加载完把键盘焦点交给 VNC
+                window.setTimeout(focusImeProxy, 0);
                 injectVncStyle(); // 让原生控制条在深色背景下可见
-                // 注意：不再调用 patchVncIme —— enable_ime 已关，直接打字走纯 keysym（英文/数字正常）；
-                // 中文由底部「中文输入条」承担。那套合成拦截既脆弱又会损坏混合输入，已弃用。
+                // 注意：不再调用 patchVncIme —— enable_ime 已关；中文由透明输入代理承接，
+                // 上屏后通过剪贴板 + Ctrl+V 进微信，输入条只作为兜底。
               }, 500);
             }}
           />
@@ -689,6 +876,23 @@ export default function InstanceView({ onOpenMenu }: { onOpenMenu: () => void })
             </div>
           )}
           </div>
+
+          <textarea
+            ref={imeProxyRef}
+            className={imeProxyClassName({ mobile: imeProxyMobile, typing: imeProxyTyping, active: imeProxyActive })}
+            aria-label="远程桌面输入代理"
+            autoCapitalize="off"
+            autoComplete="off"
+            autoCorrect="off"
+            enterKeyHint="send"
+            inputMode="text"
+            placeholder=" "
+            spellCheck={false}
+            onCompositionStart={() => imeBuffer.current?.compositionStart()}
+            onCompositionEnd={onImeProxyCompositionEnd}
+            onInput={onImeProxyInput}
+            onKeyDown={onImeProxyKeyDown}
+          />
 
           {imeBar && (
             <div className="iv-imebar">

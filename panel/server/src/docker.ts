@@ -582,6 +582,33 @@ export async function typeInInstance(inst: Instance, text: string): Promise<void
   await execCapture(inst, ['bash', '-c', cmd]);
 }
 
+const KEY_ALIASES: Record<string, string> = {
+  Backspace: 'BackSpace',
+  Delete: 'Delete',
+  Enter: 'Return',
+  Tab: 'Tab',
+  Escape: 'Escape',
+  ArrowLeft: 'Left',
+  ArrowRight: 'Right',
+  ArrowUp: 'Up',
+  ArrowDown: 'Down',
+  Home: 'Home',
+  End: 'End',
+  Paste: 'ctrl+v',
+  'Ctrl+A': 'ctrl+a',
+  'Ctrl+C': 'ctrl+c',
+  'Ctrl+V': 'ctrl+v',
+  'Ctrl+X': 'ctrl+x',
+  'Ctrl+Y': 'ctrl+y',
+  'Ctrl+Z': 'ctrl+z',
+};
+
+export async function keyInInstance(inst: Instance, key: string): Promise<void> {
+  const xKey = KEY_ALIASES[key];
+  if (!xKey) throw new Error('按键不支持');
+  await execCapture(inst, ['xdotool', 'key', '--clearmodifiers', xKey]);
+}
+
 // ---------- 数据卷管理（仅管理员；路由层用 requireAdmin 限制） ----------
 // 数据卷 = 容器内 /config 持久卷，含微信全部数据（登录态、加密聊天库等）。提供浏览/上传/解压/下载/
 // 改名/移动/删除 + 整卷备份/恢复。主要场景：把 PC 微信数据迁移上来、跨实例迁移、离线备份。
